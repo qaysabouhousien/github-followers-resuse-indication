@@ -1,37 +1,16 @@
 import requests
-import pymysql.cursors
 from requests import auth
 from requests.auth import HTTPBasicAuth
 import time
+from db_connector import DBConnection
 
 
-# TODO put your username password
-connection = pymysql.connect(host="localhost",
-                user="root",
-                password="qais1995",
-                db="github",
-                charset="utf8mb4",
-                cursorclass=pymysql.cursors.DictCursor)
 oauth_token = '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'
 github_token_user = 'qaysabouhousien' 
-def executeSelect(query):
-    with connection.cursor() as cursor:
-        cursor.execute(query)
-        connection.commit()
-        result = cursor.fetchall()
-        return result
-
-
-def executeInsert(query):
-    with connection.cursor() as cursor:
-        cursor.execute(query)
-        connection.commit()
-        return cursor.lastrowid
-
-
+db_con = DBConnection()
 
 def followers():
-    res = executeSelect('select id,login from users')
+    res = db_con.executeSelect('select id,login from users')
     for i in res:
         username = i['login']
         id = i['id']
@@ -41,11 +20,11 @@ def followers():
         if 'followers' in json:
             followers = json['followers']
             print(followers)
-            executeInsert(f'UPDATE users SET followers = {followers} WHERE id = {id}')
+            db_con.executeInsert(f'UPDATE users SET followers = {followers} WHERE id = {id}')
 
 
 def repos():
-    res = executeSelect("""SELECT id, login FROM  users u
+    res = db_con.executeSelect("""SELECT id, login FROM  users u
     ORDER BY `followers` DESC""")
     for i in res:
         username = i['login']
@@ -72,11 +51,11 @@ def repos():
                 '{repo['name']}','{desc}','{repo['language']}' ,
                 '{repo['created_at']}', {forked_from}, 0, '{repo['updated_at']}');"""
             print(insert)
-            executeInsert(insert)
+            db_con.executeInsert(insert)
 
 
 def forks():
-    res = executeSelect("""SELECT u.login,u.id AS user_id,p.id AS repo_id,p.name,(SELECT COUNT(*) FROM projects forks WHERE forks.forked_from = p.id)
+    res = db_con.executeSelect("""SELECT u.login,u.id AS user_id,p.id AS repo_id,p.name,(SELECT COUNT(*) FROM projects forks WHERE forks.forked_from = p.id)
     FROM users u
     INNER JOIN projects p ON u.id = p.owner_id
 
@@ -123,7 +102,7 @@ def forks():
                     '{repo['name']}','{desc}','{repo['language']}' ,
                     '{created_at}', {forked_from}, 0, '{updated_at}');"""
                 print(insert)
-                executeInsert(insert)
+                db_con.executeInsert(insert)
             if len(forks) < 100:
                 break
             page+=1

@@ -2,6 +2,8 @@ from statsmodels.tsa.ar_model import AutoReg
 from statsmodels.tsa.arima.model import ARIMA
 from random import random
 from db_connector import DBConnection
+from matplotlib import pyplot
+import pandas
 # contrived dataset
 # data = [x + random() for x in range(1, 100)]
 # # AR example
@@ -25,6 +27,15 @@ db_con = DBConnection()
 def repository_first_fork_date(repository_id):
     q= f"""
         SELECT MIN(DATE(created_at)) min_date FROM projects WHERE forked_from = {repository_id} 
+    """
+    res=  db_con.executeSelect(q)
+    return res[0]['min_date']
+
+def user_first_fork_date(user_id):
+    q= f"""
+        SELECT MIN(DATE(p2.created_at)) min_date 
+        FROM projects p1 INNER JOIN projects p2 ON p1.id = p2.forked_from 
+        WHERE p1.owner_id = {user_id} 
     """
     res=  db_con.executeSelect(q)
     return res[0]['min_date']
@@ -60,30 +71,132 @@ def repo_time_series(repo_id):
     all_months_q = f"""
         SELECT YEAR(days) year, MONTH(days) month
         FROM last_10000_days d
-        WHERE days BETWEEN  '{start_date}' AND '2021-04-30'
+        WHERE days BETWEEN  '{start_date}' AND '2021-03-30'
         GROUP BY YEAR(days), MONTH(days)
         ORDER BY YEAR(days), MONTH(days)   
     """
     res = db_con.executeSelect(q)
     all_months = db_con.executeSelect(all_months_q)
     for i in range(len(all_months)):
+        if i >= len(res):
+            break
         p = res[i]
         m = all_months[i]
-        # print(p)
-        # print(m)
-        if p['year'] != m['year'] and p['month'] != m['month']:
-            print(p)
-            print(m)
-            break
+        if p['year'] != m['year'] or p['month'] != m['month']:
+            res.insert(i,{'year' : m['year'],'month' : m['month'],'count' :0})
+    # for i in range(len(res)):
+    #     p = res[i]
+    #     m = all_months[i] 
     return [i['count'] for i in res]
 
 
+def user_time_series(user_id):
+    start_date = user_first_fork_date(user_id)
+    q = f"""
+    SELECT YEAR(p.created_at) year, MONTH(p.created_at) month ,COUNT(*) count
+    FROM projects p INNER JOIN projects p2 ON p.forked_from = p2.id
+    WHERE p2.owner_id = {user_id}
+    GROUP BY YEAR(p.created_at), MONTH(p.created_at)
+    ORDER BY YEAR(p.created_at), MONTH(p.created_at)
+    """
+    all_months_q = f"""
+        SELECT YEAR(days) year, MONTH(days) month
+        FROM last_10000_days d
+        WHERE days BETWEEN  '{start_date}' AND '2021-03-30'
+        GROUP BY YEAR(days), MONTH(days)
+        ORDER BY YEAR(days), MONTH(days)   
+    """
+    res = db_con.executeSelect(q)
+    all_months = db_con.executeSelect(all_months_q)
+    for i in range(len(all_months)):
+        if i >= len(res):
+            break
+        p = res[i]
+        m = all_months[i]
+        if p['year'] != m['year'] or p['month'] != m['month']:
+            res.insert(i,{'year' : m['year'],'month' : m['month'],'count' :0})
+    # for i in range(len(res)):
+    #     p = res[i]
+    #     m = all_months[i] 
+    return [i['count'] for i in res]
+
+
+
+def get_all_users():
+    q =""" SELECT id FROM users """
+    res = db_con.executeSelect(q)
+    return [i['id']  for i in res]
+
+def get_all_non_forked_projects():
+    """
+    PROJECTS WITH FORKS 
+    """
+    q ="""
+        SELECT p.id
+        FROM projects p
+        INNER JOIN projects p2 ON p.id = p2.forked_from
+        WHERE p.forked_from = 0 
+        GROUP BY p.id
+        HAVING COUNT(*) > 0
+
+    """
+    res = db_con.executeSelect(q)
+    return [i['id']  for i in res]
+
+def save_repo_pred(id,pred):
+    q = f"""
+        REPLACE INTO arima_repo_forecast(repo_id,forecast) VALUES({id},{pred})
+    """
+    db_con.executeInsert(q)
+
+def save_user_pred(id,pred):
+    q = f"""
+        REPLACE INTO arima_user_forecast(user_id,forecast) VALUES({id},{pred})
+    """
+    db_con.executeInsert(q)
+
+
+
 def arima_prediction(time_series):
-    model = ARIMA(time_series, order=(2, 0, 1))
+    model = ARIMA(time_series, order=(3, 0, 3   ))
     model_fit = model.fit()
     # make prediction
     yhat = model_fit.predict(len(time_series), len(time_series))
-    print(yhat)
+    return yhat[0]  
 
-counts = repo_time_series(1451060)
-arima_prediction(counts)
+
+def run_on_projects():
+    ids = get_all_non_forked_projects()
+    for i in ids:
+        # print(i)
+        counts = repo_time_series(i)
+        print(counts)
+        if len(counts) < 10:
+            continue
+        pred = arima_prediction(counts)
+        save_repo_pred(i,pred)
+        print(pred)
+
+def run_on_users():
+    ids = get_all_users()
+    for i in ids:
+        # print(i)
+        counts = user_time_series(i)
+        print(counts)
+        if len(counts) < 10:
+            continue
+        pred = arima_prediction(counts)
+        save_user_pred(i,pred)
+        print(pred)
+
+def main():
+    run_on_users()
+
+# main()
+
+ts = user_time_series(12826)
+print(ts)
+r = pandas.DataFrame(ts)
+print(r)
+r.plot()
+pyplot.show()
